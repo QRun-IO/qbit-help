@@ -5,7 +5,7 @@ The authoring experience for QQQ in-app help: a **Help** app, coverage dashboard
 ## Requirements and installation
 
 - Java 21 and `qbit-build-parent` 2.0.0.
-- Exactly QQQ `4.1.0-help-SNAPSHOT`, the locally installed build of QRun-IO/qqq#1177. This is a development stand-in, not a published compatibility promise. Replace it with the first RC containing #1177 by 4.1.0-RC.7.
+- QQQ with help bundles (QRun-IO/qqq#1198). Verification uses the locally installed `4.1.0-help2-SNAPSHOT`; the checked-in pin is `4.1.0-RC.7`, with the stand-in removed by RC.8. This is not a claim that published RC.7 contains the bundle APIs.
 - A QQQ UI using `/qqq/v1`, including its widget and process endpoints. Next supplies the help renderer and in-context author mode.
 - A host backend supporting the standard core `helpContent` table. The host owns database schema creation/migration; the producer defines metadata, not database DDL.
 
@@ -39,7 +39,7 @@ If `helpContent` is already registered, `backendName` may be omitted. The existi
 | `applyPermissionRulesToHelpContent` | `true` | Apply help table rules to existing host storage; newly defined storage always receives them. |
 | `tableMetaDataCustomizer` | unset | Customize the existing or newly defined core table. |
 
-The app's only navigation child is **Help Content**. All three processes are actions on that table. The defaults for new rows are `ALL_SCREENS` and `MARKDOWN`, unless the host has supplied other defaults.
+The app's only navigation child is **Help Content**. Preview, key checking, and core bundle sync/accept/keep processes are actions on that table. The defaults for new rows are `ALL_SCREENS` and `MARKDOWN`, unless the host has supplied other defaults.
 
 ## Permissions
 
@@ -50,7 +50,7 @@ Only standard `QPermissionRules` are used; there is no custom permission checker
 | `help.read` | Reading/exporting help rows. |
 | `help.insert`, `help.edit`, `help.delete` | Corresponding help row operations. |
 | `help.hasAccess` | Help app and recent-changes widget. |
-| `help.author.hasAccess` | Coverage widgets, preview, apply-now, and key checking. |
+| `help.author.hasAccess` | Coverage and bundle review widgets, preview, key checking, and core sync/accept/keep actions. |
 
 Give viewers `help.read` and `help.hasAccess`. Give authors both viewer grants plus `help.insert`, `help.edit`, `help.delete`, and `help.author.hasAccess`; author access does not imply any other grant. Core coverage additionally requires insert or edit access to `helpContent`.
 
@@ -62,11 +62,18 @@ The `/qqq/v1` middleware enforces permissions. For direct Java action callers, c
 
 ## Coverage report
 
-The app home has three full-width typed `TABLE` widgets:
+The app home has seven full-width typed `TABLE` widgets:
 
 - `help_coverage_summary`: total targets, targets with help, and percentage for apps, tables, sections, fields, processes, steps, process fields, reports, widgets, and possible-value sources, plus Overall. Empty kinds show `N/A`; a summary alone counts as help.
 - `help_coverage_missing`: kind, label, parent key, canonical key, and **Add help**. It displays at most 200 missing targets, with a visible "Showing N of M" count and pagination. Links open Next's standard create screen with `key` and `ALL_SCREENS` prefilled using QQQ's `#defaultValues=` URL mechanism.
 - `help_recent_changes`: the 20 most recently modified help rows, newest first, with links to their full record screens.
+
+- `help_bundle_coverage`: each registered bundle's id, version, declared entry count, and rows applied. Here "rows applied" means persisted, resolving `CURRENT` rows attributed to that bundle/version; pending, retired, old-version, and unresolved rows are excluded. It is not a historical sync-run count or proof of cluster-wide reload.
+- `help_upstream_changed`: pending rows with key, bundle, current/upstream summaries, a short change indicator, and record links.
+- `help_retired`: edited bundle rows retained by core after retirement, with record links.
+- `help_unresolved`: rows whose keys no longer resolve using core's `HelpBundleAssertions.resolves`, including its extensible slot and wildcard rules.
+
+Pending records also have a full-width `help_upstream_diff` TABLE section: Current and Upstream columns, Summary and Content rows. Values are literal text, including Markdown/HTML source. The widget fetches the secured record by id and only returns a comparison for `UPSTREAM_CHANGED`. Other statuses return core's typed hidden-widget response. The section is hidden on edit screens. All review widgets require `help.author.hasAccess` in addition to normal table access.
 
 Coverage comes from `HelpCoverageAction`. It reflects the current session/client's help visibility, not every audience's combined coverage. Hidden targets are excluded from both numerator and denominator unless configured otherwise. Declared instance-level slots, if present, appear as an additional kind and contribute to Overall. The report counts canonical standard slots; it is not a matrix of every role or targeting variant.
 
@@ -76,9 +83,10 @@ Coverage comes from `HelpCoverageAction`. It reflects the current session/client
 2. Edit the standard help record: key, role, summary, format, content, and optional permission/client targeting. Prefer a short plain summary and Markdown for longer content.
 3. On the saved record, choose **Preview help**. Its standard Review and Result steps carry the selected content to Next's normal help renderer; open the step's help icon to view it. A view form shows summary, key, role, format, permission, and client channel. The preview makes the content visible to its author regardless of its intended screen/audience; the original targeting is shown in the form and is not modified.
 4. Choose **Check help keys** for selected rows or the current query. Review and Result show `N keys resolve`, `N keys do not match any object`, and individual bad keys as standard error lines. This checks target existence, including hidden targets and process suffix wildcards; it does not rewrite records or validate content quality.
-5. Normal QQQ inserts/edits/deletes apply through core's table customizers. After writes made directly in the database, clear any selection and run the table action **Apply help changes now**. Review makes no changes; Result says `N help entries applied`, counting rows confirmed on live targets after core reload. Unconfirmed nonempty rows produce error summary lines. Empty rows remove data-applied help and are not counted as applied entries.
+5. Use **Sync help from bundles** from the Help Content table to seed registered bundles or check newer versions. Core owns its standard Review/Result lines and reload behavior. This replaces the qbit's former **Apply help changes now** action; `help_apply_now` is removed.
+6. Open an **Upstream changed** row, compare Current and Upstream, then use **Accept upstream text** or **Keep my text**. These are core record actions with Review/Result screens. Core protects edits and rejects a stale pending review if the bundle changes again. Retired and unresolved rows remain available for an author to inspect and edit/delete using normal table actions.
 
-Reload affects the current application instance. Other nodes follow core's reload/polling behavior. It does not send a cluster-wide command.
+Normal QQQ inserts/edits/deletes apply through core customizers. Hosts needing a reload after direct database writes can call core's `QInstanceHelpContentManager.reloadHelpContent`; this qbit no longer supplies a separate reload UI action. Cross-node propagation remains core's responsibility.
 
 ## Bulk edit, import and export
 
@@ -114,9 +122,7 @@ Roles: `ALL_SCREENS`, `READ_SCREENS`, `WRITE_SCREENS`, `QUERY_SCREEN`, `VIEW_SCR
 ## Build and design
 
 ```sh
-./mvnw -o verify
-# If dependencies are not cached:
-./mvnw verify
+./mvnw -o -Dqqq.version=4.1.0-help2-SNAPSHOT verify
 ```
 
 On Windows use `mvnw.cmd`. The wrapper pins Maven 3.9.11 because Maven 3.10 rejects the current build parent's unresolved `${revision}` POM. `mvn -o verify` works with Maven 3.9.11 on PATH. Verification runs JUnit 5/AssertJ memory-backend integration tests, Checkstyle, and JaCoCo gates of 70% instructions and 90% classes.

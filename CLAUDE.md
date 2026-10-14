@@ -4,7 +4,7 @@ QQQ in-app help authoring only. Core owns storage, targeting, search, applicatio
 
 ## Build
 
-Java 21, `qbit-build-parent` 2.0.0, `qqq.version=4.1.0-help-SNAPSHOT` until the first RC containing QRun-IO/qqq#1177, no later than 4.1.0-RC.7. Use `./mvnw -o verify` (`mvnw.cmd` on Windows), then online if missing artifacts. Maven 3.10 cannot load the current parent's unflattened `${revision}`; wrapper is 3.9.11.
+Java 21, `qbit-build-parent` 2.0.0, `qqq.version=4.1.0-RC.7`; verify bundle work with local `-Dqqq.version=4.1.0-help2-SNAPSHOT` (QRun-IO/qqq#1198), stand-in deadline RC.8. Use `./mvnw -o verify` (`mvnw.cmd` on Windows), then online if missing artifacts. Maven 3.10 cannot load the current parent's unflattened `${revision}`; wrapper is 3.9.11.
 
 JUnit 5 + AssertJ, real QQQ memory backend and streamed process runner. Checkstyle is copied from qbit-webhooks. JaCoCo requires 70% instruction and 90% class coverage. Do not skip gates or exclude authoring classes.
 
@@ -13,7 +13,7 @@ JUnit 5 + AssertJ, real QQQ memory backend and streamed process runner. Checksty
 - `HelpQBitConfig`: backend/app/coverage/table customization.
 - `HelpQBitProducer`: reuse or define core table; app, widgets, actions.
 - Permissions: standard help CRUD rules, `help.hasAccess`, and `help.author.hasAccess`; host-table opt-out in config.
-- `HelpWidgets`: three full-width typed tables; Next links and standard default-values hash.
+- `HelpWidgets`: seven full-width typed home tables and the conditional record comparison; Next links and standard default-values hash.
 - `HelpProcesses`: streamed Review/Result workflows and per-run preview metadata.
 
 ## Invariants

@@ -35,7 +35,10 @@ import com.kingsrook.qqq.backend.core.model.metadata.permissions.QPermissionRule
 import com.kingsrook.qqq.backend.core.model.metadata.qbits.QBitMetaData;
 import com.kingsrook.qqq.backend.core.model.metadata.qbits.QBitMetaDataProducer;
 import com.kingsrook.qqq.backend.core.model.metadata.tables.Capability;
+import com.kingsrook.qqq.backend.core.model.metadata.tables.QFieldSection;
+import com.kingsrook.qqq.backend.core.model.metadata.tables.QFieldSectionAlternativeType;
 import com.kingsrook.qqq.backend.core.model.metadata.tables.QTableMetaData;
+import com.kingsrook.qqq.backend.core.model.metadata.tables.Tier;
 
 
 /*******************************************************************************
@@ -161,6 +164,17 @@ public class HelpQBitProducer implements QBitMetaDataProducer<HelpQBitConfig>
       {
          table.getField("role").withDefaultValue("ALL_SCREENS");
       }
+      table.withSection(new QFieldSection().withName(HelpWidgets.DIFF).withLabel("Current and upstream help")
+         .withTier(Tier.T2).withGridColumns(12).withWidgetName(HelpWidgets.DIFF)
+         .withAlternative(QFieldSectionAlternativeType.RECORD_EDIT, section -> section.withIsHidden(true)));
+      for(String name : List.of("helpBundleSync", "helpAcceptUpstream", "helpKeepMine"))
+      {
+         if(instance.getProcess(name) != null)
+         {
+            instance.getProcess(name).withPermissionRules(new QPermissionRules().withLevel(PermissionLevel.HAS_ACCESS_PERMISSION)
+               .withPermissionBaseName("help.author"));
+         }
+      }
       instance.getTables().put(HelpContent.TABLE_NAME, table);
       QBitMetaData qBit = getQBitMetaData();
       instance.addQBit(qBit);
@@ -173,7 +187,7 @@ public class HelpQBitProducer implements QBitMetaDataProducer<HelpQBitConfig>
       });
       output.add(new QAppMetaData().withName(qBitConfig.getAppName()).withLabel(qBitConfig.getAppLabel())
          .withIcon(new QIcon("help_outline")).withPermissionRules(new QPermissionRules().withLevel(PermissionLevel.HAS_ACCESS_PERMISSION).withPermissionBaseName("help"))
-         .withWidgets(List.of(HelpWidgets.SUMMARY, HelpWidgets.MISSING, HelpWidgets.RECENT)).withChild(table));
+         .withWidgets(HelpWidgets.HOME).withChild(table));
       output.addSelfToInstance(instance);
       return (new MetaDataProducerMultiOutput());
    }

@@ -23,8 +23,8 @@
 
    <properties>
       <revision>0.1.0-SNAPSHOT</revision>
-      <!-- STAND-IN(core=QRun-IO/qqq#1177, removeBy=4.1.0-RC.7): pin to the first RC containing #1177 -->
-      <qqq.version>4.1.0-help-SNAPSHOT</qqq.version>
+      <!-- STAND-IN(core=QRun-IO/qqq#1198, removeBy=4.1.0-RC.8): pin to 4.1.0-RC.7 -->
+      <qqq.version>4.1.0-RC.7</qqq.version>
       <maven.compiler.source>21</maven.compiler.source>
       <maven.compiler.target>21</maven.compiler.target>
       <jacoco.version>0.8.15</jacoco.version>

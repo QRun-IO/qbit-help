@@ -1,10 +1,10 @@
-# Core follow-ups at 4.1.0-help-SNAPSHOT
+# Core follow-ups at 4.1.0-help2-SNAPSHOT
 
 ## Recommended: explicit reload result and failure propagation
 
 `QInstanceHelpContentManager.reloadHelpContent` returns void and catches/logs exceptions. It also logs/skips invalid targets. Consequently callers cannot obtain an authoritative applied-row count, skipped keys, or success/failure status.
 
-The qbit preflights a database read, calls reload, and confirms source rows against data-applied live targets, reporting unconfirmed rows as errors. This avoids claiming that every database row was applied. It cannot prove atomic success, distinguish an unchanged old matching entry from a newly applied entry after a caught failure, or authoritatively confirm deletions across a failed reload.
+The qbit now delegates sync to core and no longer exposes a separate reload action. Its bundle coverage counts current persisted provenance, not reload success.
 
 A core result containing applied row count, rejected rows/reasons, and failure status (or a throwing reload variant) would remove that limitation. Cross-node propagation remains core's responsibility.
 

@@ -28,20 +28,26 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import com.kingsrook.qqq.backend.core.actions.ai.output.AiLinkBuilder;
 import com.kingsrook.qqq.backend.core.actions.dashboard.widgets.AbstractWidgetRenderer;
 import com.kingsrook.qqq.backend.core.actions.help.HelpCoverageAction;
 import com.kingsrook.qqq.backend.core.actions.help.HelpCoverageEntry;
 import com.kingsrook.qqq.backend.core.actions.help.HelpCoverageInput;
 import com.kingsrook.qqq.backend.core.actions.permissions.PermissionsHelper;
+import com.kingsrook.qqq.backend.core.actions.tables.GetAction;
 import com.kingsrook.qqq.backend.core.actions.tables.QueryAction;
+import com.kingsrook.qqq.backend.core.context.QContext;
 import com.kingsrook.qqq.backend.core.exceptions.QException;
+import com.kingsrook.qqq.backend.core.model.actions.tables.get.GetInput;
 import com.kingsrook.qqq.backend.core.model.actions.tables.query.QFilterOrderBy;
 import com.kingsrook.qqq.backend.core.model.actions.tables.query.QQueryFilter;
 import com.kingsrook.qqq.backend.core.model.actions.tables.query.QueryInput;
 import com.kingsrook.qqq.backend.core.model.actions.widgets.RenderWidgetInput;
 import com.kingsrook.qqq.backend.core.model.actions.widgets.RenderWidgetOutput;
+import com.kingsrook.qqq.backend.core.model.dashboard.widgets.AlertData;
 import com.kingsrook.qqq.backend.core.model.dashboard.widgets.CompositeWidgetData;
+import com.kingsrook.qqq.backend.core.model.dashboard.widgets.QWidgetData;
 import com.kingsrook.qqq.backend.core.model.dashboard.widgets.TableData;
 import com.kingsrook.qqq.backend.core.model.dashboard.widgets.WidgetType;
 import com.kingsrook.qqq.backend.core.model.dashboard.widgets.blocks.text.TextBlockData;
@@ -50,8 +56,10 @@ import com.kingsrook.qqq.backend.core.model.data.QRecord;
 import com.kingsrook.qqq.backend.core.model.helpcontent.HelpContent;
 import com.kingsrook.qqq.backend.core.model.metadata.code.QCodeReference;
 import com.kingsrook.qqq.backend.core.model.metadata.dashboard.QWidgetMetaData;
+import com.kingsrook.qqq.backend.core.model.metadata.help.bundles.HelpBundles;
 import com.kingsrook.qqq.backend.core.model.metadata.permissions.PermissionLevel;
 import com.kingsrook.qqq.backend.core.model.metadata.permissions.QPermissionRules;
+import com.kingsrook.qqq.backend.core.testing.HelpBundleAssertions;
 import com.kingsrook.qqq.backend.core.utils.JsonUtils;
 
 
@@ -63,6 +71,12 @@ public class HelpWidgets extends AbstractWidgetRenderer
    public static final String SUMMARY = "help_coverage_summary";
    public static final String MISSING = "help_coverage_missing";
    public static final String RECENT = "help_recent_changes";
+   public static final String UPSTREAM = "help_upstream_changed";
+   public static final String RETIRED = "help_retired";
+   public static final String UNRESOLVED = "help_unresolved";
+   public static final String BUNDLES = "help_bundle_coverage";
+   public static final String DIFF = "help_upstream_diff";
+   public static final List<String> HOME = List.of(SUMMARY, BUNDLES, UPSTREAM, RETIRED, UNRESOLVED, MISSING, RECENT);
    public static final int MISSING_LIMIT = 200;
    private static final Map<String, String> KIND_LABELS = Map.ofEntries(
       Map.entry("app", "Apps"), Map.entry("table", "Tables"), Map.entry("section", "Sections"),
@@ -80,12 +94,17 @@ public class HelpWidgets extends AbstractWidgetRenderer
    public static List<QWidgetMetaData> metadata(HelpQBitConfig config)
    {
       List<QWidgetMetaData> widgets = new ArrayList<>();
-      for(String name : List.of(SUMMARY, MISSING, RECENT))
+      for(String name : List.of(SUMMARY, MISSING, RECENT, BUNDLES, UPSTREAM, RETIRED, UNRESOLVED, DIFF))
       {
          String label = switch(name)
          {
             case SUMMARY -> "Help coverage";
             case MISSING -> "Missing help";
+            case BUNDLES -> "Help bundle coverage";
+            case UPSTREAM -> "Upstream changed";
+            case RETIRED -> "Retired";
+            case UNRESOLVED -> "Keys that no longer resolve";
+            case DIFF -> "Current and upstream help";
             default -> "Recent changes";
          };
          widgets.add(new QWidgetMetaData().withName(name).withLabel(label).withType(WidgetType.TABLE.getType())
@@ -108,6 +127,17 @@ public class HelpWidgets extends AbstractWidgetRenderer
       if(RECENT.equals(input.getWidgetMetaData().getName()))
       {
          return (new RenderWidgetOutput(recent()));
+      }
+      String name = input.getWidgetMetaData().getName();
+      if(DIFF.equals(name))
+      {
+         return (new RenderWidgetOutput(diff(input)));
+      }
+      if(List.of(BUNDLES, UPSTREAM, RETIRED, UNRESOLVED).contains(name))
+      {
+         List<QRecord> records = new QueryAction().execute(new QueryInput(HelpContent.TABLE_NAME)
+            .withShouldFetchHeavyFields(true).withFilter(new QQueryFilter().withOrderBy(new QFilterOrderBy("id", true)))).getRecords();
+         return (new RenderWidgetOutput(BUNDLES.equals(name) ? bundles(records) : review(name, records)));
       }
       boolean hidden = Boolean.TRUE.equals(input.getWidgetMetaData().getDefaultValues().get("includeHidden"));
       List<HelpCoverageEntry> entries = new HelpCoverageAction().execute(new HelpCoverageInput()).getEntries().stream()
@@ -199,6 +229,111 @@ public class HelpWidgets extends AbstractWidgetRenderer
       return (new TableData("Most recent " + records.size() + " help entries", List.of(column("Key", "key"),
          column("Summary", "summary"), column("Role", "role"), column("Modified", "modified"),
          column("Record", "record").withType("composite")), rows).withRowsPerPage(20));
+   }
+
+
+
+   /*******************************************************************************
+    ** Pending and retired rows remain ordinary record links with core actions.
+    *******************************************************************************/
+   private static TableData review(String name, List<QRecord> records)
+   {
+      List<Map<String, Object>> rows = new ArrayList<>();
+      for(QRecord record : records)
+      {
+         boolean include = switch(name)
+         {
+            case UPSTREAM -> "UPSTREAM_CHANGED".equals(record.getValueString("upstreamStatus"));
+            case RETIRED -> "RETIRED".equals(record.getValueString("upstreamStatus"));
+            default -> !resolves(record);
+         };
+         if(!include)
+         {
+            continue;
+         }
+         Map<String, Object> row = new LinkedHashMap<>();
+         for(String field : List.of("key", "bundleId", "summary", "upstreamSummary"))
+         {
+            row.put(field, record.getValue(field));
+         }
+         List<String> changes = new ArrayList<>();
+         for(String field : List.of("summary", "content"))
+         {
+            String upstream = "upstream" + Character.toUpperCase(field.charAt(0)) + field.substring(1);
+            if(!Objects.equals(record.getValueString(field), record.getValueString(upstream)))
+            {
+               changes.add(field + " changed");
+            }
+         }
+         row.put("changes", String.join(", ", changes));
+         row.put("record", link("View help", AiLinkBuilder.recordHref(HelpContent.TABLE_NAME, record.getValue("id"))));
+         rows.add(row);
+      }
+      List<TableData.Column> columns = new ArrayList<>(List.of(column("Key", "key"), column("Bundle", "bundleId"), column("Current summary", "summary")));
+      if(UPSTREAM.equals(name))
+      {
+         columns.add(column("Upstream summary", "upstreamSummary"));
+         columns.add(column("Changes", "changes"));
+      }
+      columns.add(column("Record", "record").withType("composite"));
+      return (new TableData(rows.size() + " help entries", columns, rows).withRowsPerPage(20));
+   }
+
+
+
+   /*******************************************************************************
+    ** Counts persisted current rows of each registered bundle version.
+    *******************************************************************************/
+   private static TableData bundles(List<QRecord> records)
+   {
+      List<Map<String, Object>> rows = new ArrayList<>();
+      for(var bundle : HelpBundles.of(QContext.getQInstance()).getBundles())
+      {
+         long applied = records.stream().filter(record -> bundle.getId().equals(record.getValueString("bundleId"))
+            && bundle.getVersion().equals(record.getValueString("bundleVersion"))
+            && "CURRENT".equals(record.getValueString("upstreamStatus"))
+            && resolves(record)).count();
+         rows.add(Map.of("bundle", bundle.getId(), "version", bundle.getVersion(), "entries", bundle.getEntries().size(), "applied", applied));
+      }
+      return (new TableData("Registered bundles (rows applied at the current version)", List.of(column("Bundle", "bundle"),
+         column("Version", "version"), column("Entries", "entries"), column("Rows applied", "applied")), rows).withRowsPerPage(20));
+   }
+
+
+
+   /*******************************************************************************
+    ** Core owns key grammar; malformed legacy rows can have a null key.
+    *******************************************************************************/
+   private static boolean resolves(QRecord record)
+   {
+      String key = record.getValueString("key");
+      return (key != null && HelpBundleAssertions.resolves(QContext.getQInstance(), key));
+   }
+
+
+
+   /*******************************************************************************
+    ** Fetch the secured record, never trust status or content from query parameters.
+    ** A typed hidden response suppresses the widget outside pending reviews.
+    *******************************************************************************/
+   private static QWidgetData diff(RenderWidgetInput input) throws QException
+   {
+      String id = input.getQueryParams().get("id");
+      QRecord record = id == null || id.isBlank() ? null : new GetAction().execute(new GetInput(HelpContent.TABLE_NAME)
+         .withPrimaryKey(id).withShouldFetchHeavyFields(true)).getRecord();
+      if(record == null || !"UPSTREAM_CHANGED".equals(record.getValueString("upstreamStatus")))
+      {
+         return (new AlertData().withHideWidget(true));
+      }
+      List<Map<String, Object>> rows = new ArrayList<>();
+      for(String field : List.of("Summary", "Content"))
+      {
+         rows.add(Map.of("current", field + ":\n" + Objects.toString(record.getValueString(field.toLowerCase(Locale.ROOT)), ""),
+            "upstream", field + ":\n" + Objects.toString(record.getValueString("upstream" + field), "")));
+      }
+      return (new TableData("Compare Summary and Content before accepting upstream or keeping yours",
+         List.of(column("Current", "current"), column("Upstream", "upstream")), rows)
+         .withRowsPerPage(2).withHidePaginationDropdown(true));
    }
 
 

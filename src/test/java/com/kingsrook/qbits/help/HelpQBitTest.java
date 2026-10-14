@@ -67,10 +67,8 @@ import com.kingsrook.qqq.backend.core.model.metadata.tables.Capability;
 import com.kingsrook.qqq.backend.core.model.metadata.tables.QTableMetaData;
 import com.kingsrook.qqq.backend.core.model.session.QSession;
 import com.kingsrook.qqq.backend.core.modules.backend.implementations.memory.MemoryBackendModule;
-import com.kingsrook.qqq.backend.core.modules.backend.implementations.memory.MemoryDeleteAction;
 import com.kingsrook.qqq.backend.core.modules.backend.implementations.memory.MemoryInsertAction;
 import com.kingsrook.qqq.backend.core.modules.backend.implementations.memory.MemoryRecordStore;
-import com.kingsrook.qqq.backend.core.modules.backend.implementations.memory.MemoryUpdateAction;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -170,15 +168,15 @@ class HelpQBitTest
       assertThat(instance.getTables()).containsOnlyKeys("person", "helpContent");
       assertThat(instance.getApp("help").getLabel()).isEqualTo("Help");
       assertThat(instance.getApp("help").getChildren()).containsExactly(instance.getTable("helpContent"));
-      assertThat(instance.getApp("help").getWidgets()).containsExactly(HelpWidgets.SUMMARY, HelpWidgets.MISSING, HelpWidgets.RECENT);
+      assertThat(instance.getApp("help").getWidgets()).containsExactlyElementsOf(HelpWidgets.HOME);
       assertThat(instance.getWidgets().values()).allSatisfy(widget ->
       {
          assertThat(widget.getType()).isEqualTo(WidgetType.TABLE.getType());
          assertThat(widget.getGridColumns()).isEqualTo(12);
       });
-      assertThat(instance.getProcesses()).containsKeys(HelpProcesses.PREVIEW, HelpProcesses.APPLY, HelpProcesses.CHECK,
-         "helpContent.bulkInsert", "helpContent.bulkEdit", "helpContent.bulkEditWithFile");
-      assertThat(List.of(instance.getProcess(HelpProcesses.PREVIEW), instance.getProcess(HelpProcesses.APPLY), instance.getProcess(HelpProcesses.CHECK))).allSatisfy(process ->
+      assertThat(instance.getProcesses()).containsKeys(HelpProcesses.PREVIEW, "helpBundleSync", HelpProcesses.CHECK,
+         "helpAcceptUpstream", "helpKeepMine", "helpContent.bulkInsert", "helpContent.bulkEdit", "helpContent.bulkEditWithFile");
+      assertThat(List.of(instance.getProcess(HelpProcesses.PREVIEW), instance.getProcess("helpBundleSync"), instance.getProcess("helpAcceptUpstream"), instance.getProcess("helpKeepMine"), instance.getProcess(HelpProcesses.CHECK))).allSatisfy(process ->
       {
          assertThat(process.getTableName()).isEqualTo("helpContent");
          assertThat(process.getFrontendStep("review")).isNotNull();
@@ -186,7 +184,7 @@ class HelpQBitTest
       });
       assertThat(instance.getProcess(HelpProcesses.PREVIEW).getMinInputRecords()).isEqualTo(1);
       assertThat(instance.getProcess(HelpProcesses.PREVIEW).getMaxInputRecords()).isEqualTo(1);
-      assertThat(instance.getProcess(HelpProcesses.APPLY).getMaxInputRecords()).isZero();
+      assertThat(instance.getProcesses()).doesNotContainKey("help_apply_now");
       var table = instance.getTable("helpContent");
       assertThat(table.getIsHidden()).isFalse();
       assertThat(table.getFields()).containsKeys("summary", "permissionName", "clientChannel");
@@ -388,29 +386,6 @@ class HelpQBitTest
 
 
    /*******************************************************************************
-    ** Apply Reloads Direct Backend Insert Update And Delete.
-    *******************************************************************************/
-   @Test
-   void applyReloadsDirectBackendInsertUpdateAndDelete() throws Exception
-   {
-      QRecord record = help(1, "table:person;field:name");
-      new MemoryInsertAction().execute(new InsertInput("helpContent").withRecord(record));
-      assertThat(instance.getTable("person").getField("name").getHelpContents()).isNullOrEmpty();
-      var first = ProcessRunner.run(HelpProcesses.APPLY);
-      assertThat(first.review()).contains("Reload all help entries on this application instance");
-      assertThat(first.result()).containsExactly("1 help entries applied");
-      assertThat(instance.getTable("person").getField("name").getHelpContents().getFirst().getSummary()).isEqualTo("Short help 1");
-      new MemoryUpdateAction().execute(new UpdateInput("helpContent").withRecord(record.withValue("summary", "Changed")));
-      assertThat(ProcessRunner.run(HelpProcesses.APPLY).result()).containsExactly("1 help entries applied");
-      assertThat(instance.getTable("person").getField("name").getHelpContents().getFirst().getSummary()).isEqualTo("Changed");
-      new MemoryDeleteAction().execute(new DeleteInput("helpContent").withPrimaryKeys(List.of(1)));
-      assertThat(ProcessRunner.run(HelpProcesses.APPLY).result()).containsExactly("0 help entries applied");
-      assertThat(instance.getTable("person").getField("name").getHelpContents()).isEmpty();
-   }
-
-
-
-   /*******************************************************************************
     ** Check Keys Reports Good Bad Hidden And Wildcard Keys.
     *******************************************************************************/
    @Test
@@ -450,13 +425,13 @@ class HelpQBitTest
          .isInstanceOf(QPermissionDeniedException.class);
       assertThatThrownBy(() -> widget(HelpWidgets.SUMMARY)).isInstanceOf(QPermissionDeniedException.class);
       assertThatThrownBy(() -> widget(HelpWidgets.MISSING)).isInstanceOf(QPermissionDeniedException.class);
-      for(String process : List.of(HelpProcesses.PREVIEW, HelpProcesses.APPLY, HelpProcesses.CHECK))
+      for(String process : List.of(HelpProcesses.PREVIEW, "helpBundleSync", HelpProcesses.CHECK))
       {
          assertThat(PermissionsHelper.hasProcessPermission(new QueryInput(), process)).isFalse();
          assertThatThrownBy(() -> ProcessRunner.run(process)).isInstanceOf(QPermissionDeniedException.class);
       }
       assertThatThrownBy(() -> new HelpCoverageAction().execute(new HelpCoverageInput())).isInstanceOf(QPermissionDeniedException.class);
-      assertThatThrownBy(() -> ProcessRunner.run(HelpProcesses.APPLY)).isInstanceOf(QPermissionDeniedException.class);
+      assertThatThrownBy(() -> ProcessRunner.run("helpBundleSync")).isInstanceOf(QPermissionDeniedException.class);
       PermissionsHelper.checkAppPermissionThrowing(new QueryInput(), "help");
       as();
       assertThatThrownBy(() -> new QueryAction().execute(new QueryInput("helpContent"))).isInstanceOf(QPermissionDeniedException.class);
@@ -478,21 +453,6 @@ class HelpQBitTest
       assertThat(recent.getRows()).hasSize(20);
       assertThat(href(recent.getRows().getFirst(), "record")).isEqualTo("/app/helpContent/25");
       assertThat(href(recent.getRows().getLast(), "record")).isEqualTo("/app/helpContent/6");
-   }
-
-
-
-   /*******************************************************************************
-    ** Apply Reports Unresolved Rows Without Claiming They Were Applied.
-    *******************************************************************************/
-   @Test
-   void applyReportsUnresolvedRowsWithoutClaimingTheyWereApplied() throws Exception
-   {
-      new MemoryInsertAction().execute(new InsertInput("helpContent").withRecords(List.of(
-         help(1, "table:person;field:name"), help(2, "table:missing;field:x"),
-         help(3, "table:person;slot:help").withValue("summary", "").withValue("content", ""))));
-      assertThat(ProcessRunner.run(HelpProcesses.APPLY).result()).containsExactly(
-         "1 help entries applied", "1 help entries could not be confirmed as applied", "table:missing;field:x");
    }
 
 
@@ -544,7 +504,7 @@ class HelpQBitTest
       assertThat(table.getInsertPermission()).isTrue();
       assertThat(table.getEditPermission()).isTrue();
       assertThat(table.getDeletePermission()).isTrue();
-      for(String process : List.of(HelpProcesses.PREVIEW, HelpProcesses.APPLY, HelpProcesses.CHECK))
+      for(String process : List.of(HelpProcesses.PREVIEW, "helpBundleSync", HelpProcesses.CHECK))
       {
          assertThat(PermissionsHelper.hasProcessPermission(input, process)).isTrue();
       }
@@ -603,4 +563,113 @@ class HelpQBitTest
          .withTableMetaDataCustomizer((q, t) -> t.withName("renamed"))).produce(base()))
          .hasMessageContaining("without renaming");
    }
+
+   /*******************************************************************************
+    ** Review status filtering, literal diff content, links, and permissions.
+    *******************************************************************************/
+   @Test
+   void bundleReviewWidgetsAndRecordDiff() throws Exception
+   {
+      new MemoryInsertAction().execute(new InsertInput("helpContent").withRecords(List.of(
+         help(1, "table:person;field:name").withValue("bundleId", "test").withValue("bundleVersion", "1")
+            .withValue("upstreamStatus", "UPSTREAM_CHANGED").withValue("upstreamSummary", "New summary")
+            .withValue("upstreamContent", "<script>plain text</script>"),
+         help(2, "table:gone;slot:help").withValue("upstreamStatus", "RETIRED"),
+         help(3, "table:person;slot:help").withValue("upstreamStatus", "CURRENT"),
+         help(4, "process:*preview;step:review"), help(5, "table:person;field:hidden"))));
+      var changed = widget(HelpWidgets.UPSTREAM).getRows();
+      assertThat(changed).hasSize(1);
+      assertThat(changed.getFirst()).containsEntry("summary", "Short help 1").containsEntry("upstreamSummary", "New summary")
+         .containsEntry("changes", "summary changed, content changed").containsEntry("bundleId", "test");
+      assertThat(href(changed.getFirst(), "record")).isEqualTo("/app/helpContent/1");
+      assertThat(widget(HelpWidgets.RETIRED).getRows()).singleElement().satisfies(row -> assertThat(row.get("key")).isEqualTo("table:gone;slot:help"));
+      assertThat(widget(HelpWidgets.UNRESOLVED).getRows()).hasSize(1);
+      var input = new RenderWidgetInput().withWidgetMetaData(instance.getWidget(HelpWidgets.DIFF)).withUrlParams(Map.of("id", "1"));
+      var diff = (TableData) new HelpWidgets().render(input).getWidgetData();
+      assertThat(diff.getColumns()).hasSize(2);
+      assertThat(diff.getRows()).containsExactly(Map.of("current", "Summary:\nShort help 1", "upstream", "Summary:\nNew summary"),
+         Map.of("current", "Content:\nRead **this** first.", "upstream", "Content:\n<script>plain text</script>"));
+      for(String id : List.of("2", "3", "999", ""))
+      {
+         var hidden = (com.kingsrook.qqq.backend.core.model.dashboard.widgets.AlertData) new HelpWidgets().render(input.withUrlParams(Map.of("id", id))).getWidgetData();
+         assertThat(hidden.getHideWidget()).isTrue();
+      }
+      assertThat(instance.getTable("helpContent").getSections()).anySatisfy(section ->
+      {
+         assertThat(section.getWidgetName()).isEqualTo(HelpWidgets.DIFF);
+         assertThat(section.getGridColumns()).isEqualTo(12);
+      });
+      as("help.read", "help.hasAccess");
+      for(String name : List.of(HelpWidgets.UPSTREAM, HelpWidgets.RETIRED, HelpWidgets.UNRESOLVED, HelpWidgets.BUNDLES, HelpWidgets.DIFF))
+      {
+         assertThatThrownBy(() -> widget(name)).isInstanceOf(QPermissionDeniedException.class);
+      }
+      for(String name : List.of("helpBundleSync", "helpAcceptUpstream", "helpKeepMine"))
+      {
+         assertThat(PermissionsHelper.hasProcessPermission(new QueryInput(), name)).isFalse();
+      }
+   }
+
+
+   /*******************************************************************************
+    ** Bundle coverage separates versions, pending rows and unresolved targets.
+    *******************************************************************************/
+   @Test
+   void bundleCountsSeparateVersionsAndPendingRows() throws Exception
+   {
+      com.kingsrook.qqq.backend.core.model.metadata.help.bundles.HelpBundles.register(instance, "help/review-test.yaml");
+      var registry = com.kingsrook.qqq.backend.core.model.metadata.help.bundles.HelpBundles.of(instance);
+      var bundle = registry.getBundles().getLast();
+      new MemoryInsertAction().execute(new InsertInput("helpContent").withRecords(List.of(
+         help(1, "table:person;slot:help").withValue("bundleId", bundle.getId()).withValue("bundleVersion", bundle.getVersion()).withValue("upstreamStatus", "CURRENT"),
+         help(2, "table:person;field:name").withValue("bundleId", bundle.getId()).withValue("bundleVersion", bundle.getVersion()).withValue("upstreamStatus", "UPSTREAM_CHANGED"),
+         help(3, "table:person;field:name").withValue("bundleId", bundle.getId()).withValue("bundleVersion", "old").withValue("upstreamStatus", "CURRENT"),
+         help(4, "table:gone;slot:help").withValue("bundleId", bundle.getId()).withValue("bundleVersion", bundle.getVersion()).withValue("upstreamStatus", "CURRENT"))));
+      assertThat(widget(HelpWidgets.BUNDLES).getRows()).hasSize(2);
+      assertThat(widget(HelpWidgets.BUNDLES).getRows().getFirst().get("applied")).isEqualTo(0L);
+      assertThat(widget(HelpWidgets.BUNDLES).getRows().stream().filter(row -> bundle.getId().equals(row.get("bundle"))).toList()).singleElement().satisfies(row ->
+         assertThat(row).containsEntry("bundle", bundle.getId()).containsEntry("version", bundle.getVersion())
+            .containsEntry("entries", bundle.getEntries().size()).containsEntry("applied", 1L));
+   }
+
+
+
+   /*******************************************************************************
+    ** Empty tables and legacy null keys remain safe to inspect.
+    *******************************************************************************/
+   @Test
+   void emptyReviewAndSummaryOnlyChange() throws Exception
+   {
+      for(String name : List.of(HelpWidgets.UPSTREAM, HelpWidgets.RETIRED, HelpWidgets.UNRESOLVED))
+      {
+         assertThat(widget(name).getRows()).isEmpty();
+      }
+      new MemoryInsertAction().execute(new InsertInput("helpContent").withRecords(List.of(
+         help(1, "table:person;slot:custom").withValue("upstreamStatus", "UPSTREAM_CHANGED")
+            .withValue("upstreamSummary", "New").withValue("upstreamContent", "Read **this** first."),
+         help(2, null))));
+      assertThat(widget(HelpWidgets.UPSTREAM).getRows()).singleElement().satisfies(row -> assertThat(row.get("changes")).isEqualTo("summary changed"));
+      assertThat(widget(HelpWidgets.UNRESOLVED).getRows()).singleElement().satisfies(row -> assertThat(row.get("key")).isNull());
+      assertThat(((com.kingsrook.qqq.backend.core.model.dashboard.widgets.AlertData) new HelpWidgets().render(
+         new RenderWidgetInput().withWidgetMetaData(instance.getWidget(HelpWidgets.DIFF))).getWidgetData()).getHideWidget()).isTrue();
+   }
+
+
+   /*******************************************************************************
+    ** Core sync has a read-only review and populates persisted bundle counts.
+    *******************************************************************************/
+   @Test
+   void coreSyncSuppliesReviewAndResultAndPopulatesBundleCoverage() throws Exception
+   {
+      com.kingsrook.qqq.backend.core.model.metadata.help.bundles.HelpBundles.register(instance, "help/review-test.yaml");
+      var review = review("helpBundleSync", "");
+      assertThat(review.getException()).isEmpty();
+      assertThat(new QueryAction().execute(new QueryInput("helpContent")).getRecords()).isEmpty();
+      var lines = ProcessRunner.run("helpBundleSync");
+      assertThat(lines.review()).isNotEmpty();
+      assertThat(lines.result()).isNotEmpty();
+      assertThat(widget(HelpWidgets.BUNDLES).getRows().stream().filter(row -> "review-test".equals(row.get("bundle"))).toList())
+         .singleElement().satisfies(row -> assertThat(row).containsEntry("entries", 1).containsEntry("applied", 1L));
+   }
+
 }

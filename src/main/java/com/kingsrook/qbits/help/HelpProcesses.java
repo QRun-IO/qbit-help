@@ -26,7 +26,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import com.kingsrook.qqq.backend.core.actions.help.HelpCoverageAction;
@@ -34,17 +33,14 @@ import com.kingsrook.qqq.backend.core.actions.help.HelpCoverageEntry;
 import com.kingsrook.qqq.backend.core.actions.help.HelpCoverageInput;
 import com.kingsrook.qqq.backend.core.actions.help.HelpTarget;
 import com.kingsrook.qqq.backend.core.actions.help.HelpTargetCatalog;
-import com.kingsrook.qqq.backend.core.actions.tables.QueryAction;
 import com.kingsrook.qqq.backend.core.context.QContext;
 import com.kingsrook.qqq.backend.core.exceptions.QException;
-import com.kingsrook.qqq.backend.core.instances.QInstanceHelpContentManager;
 import com.kingsrook.qqq.backend.core.model.actions.processes.ProcessMetaDataAdjustment;
 import com.kingsrook.qqq.backend.core.model.actions.processes.ProcessSummaryLine;
 import com.kingsrook.qqq.backend.core.model.actions.processes.ProcessSummaryLineInterface;
 import com.kingsrook.qqq.backend.core.model.actions.processes.RunBackendStepInput;
 import com.kingsrook.qqq.backend.core.model.actions.processes.RunBackendStepOutput;
 import com.kingsrook.qqq.backend.core.model.actions.processes.Status;
-import com.kingsrook.qqq.backend.core.model.actions.tables.query.QueryInput;
 import com.kingsrook.qqq.backend.core.model.data.QRecord;
 import com.kingsrook.qqq.backend.core.model.helpcontent.HelpContent;
 import com.kingsrook.qqq.backend.core.model.metadata.fields.QFieldMetaData;
@@ -75,7 +71,6 @@ import com.kingsrook.qqq.backend.core.processes.implementations.etl.streamedwith
 public final class HelpProcesses
 {
    public static final String PREVIEW = "help_preview";
-   public static final String APPLY = "help_apply_now";
    public static final String CHECK = "help_check_keys";
    private static final List<String> PREVIEW_FIELDS = List.of("summary", "key", "role", "format", "permissionName", "clientChannel");
 
@@ -98,8 +93,6 @@ public final class HelpProcesses
       return (List.of(
          etl(PREVIEW, "Preview help", ExtractViaQueryStep.class, PreviewTransform.class, ReadOnlyLoad.class)
             .withMinInputRecords(1).withMaxInputRecords(1),
-         etl(APPLY, "Apply help changes now", ReloadExtract.class, ReloadReview.class, ReloadLoad.class)
-            .withMinInputRecords(0).withMaxInputRecords(0),
          etl(CHECK, "Check help keys", ExtractViaQueryStep.class, CheckTransform.class, ReadOnlyLoad.class)));
    }
 
@@ -341,131 +334,4 @@ public final class HelpProcesses
 
 
 
-   /*******************************************************************************
-    ** One synthetic ETL work item makes reload run once, even for an empty table.
-    *******************************************************************************/
-   public static class ReloadExtract extends AbstractExtractStep
-   {
-      /*******************************************************************************
-       ** Reload is table-wide and independent of selection or pagination.
-       *******************************************************************************/
-      @Override
-      public void run(RunBackendStepInput input, RunBackendStepOutput output) throws QException
-      {
-         getRecordPipe().addRecord(new QRecord());
-      }
-   }
-
-
-
-   /*******************************************************************************
-    ** Reload's review stage has no side effects.
-    *******************************************************************************/
-   public static class ReloadReview extends AbstractTransformStep
-   {
-      /*******************************************************************************
-       ** Preserve the single reload work item.
-       *******************************************************************************/
-      @Override
-      public void runOnePage(RunBackendStepInput input, RunBackendStepOutput output) throws QException
-      {
-         output.getRecords().addAll(input.getRecords());
-      }
-
-
-
-      /*******************************************************************************
-       ** Standard review line.
-       *******************************************************************************/
-      @Override
-      public ArrayList<ProcessSummaryLineInterface> getProcessSummary(RunBackendStepOutput output, boolean result)
-      {
-         return (new ArrayList<>(List.of(new ProcessSummaryLine(Status.INFO, null, "Reload all help entries on this application instance"))));
-      }
-   }
-
-
-
-   /*******************************************************************************
-    ** Explicit reload for external database writes and bulk imports.
-    *******************************************************************************/
-   public static class ReloadLoad extends AbstractLoadStep implements ProcessSummaryProviderInterface
-   {
-      private int applied;
-      private final List<String> notApplied = new ArrayList<>();
-
-
-
-      /*******************************************************************************
-       ** Read first so database read failures fail the action, then reload core.
-       ** Count rows whose content is present in the target catalog after reload.
-       *******************************************************************************/
-      @Override
-      public void runOnePage(RunBackendStepInput input, RunBackendStepOutput output) throws QException
-      {
-         List<QRecord> records = new QueryAction().execute(new QueryInput().withTableName(HelpContent.TABLE_NAME)
-            .withShouldFetchHeavyFields(true)).getRecords();
-         QInstanceHelpContentManager.reloadHelpContent(QContext.getQInstance());
-         List<HelpTarget> targets = HelpTargetCatalog.collect(QContext.getQInstance());
-         applied = 0;
-         notApplied.clear();
-         for(QRecord record : records)
-         {
-            boolean found = targets.stream().filter(target -> resolves(record.getValueString("key"), Set.of(target.key())))
-               .anyMatch(target -> target.contents() != null && target.contents().stream().anyMatch(help -> matches(record, help)));
-            if(found)
-            {
-               applied++;
-            }
-            else if(hasText(record.getValueString("summary")) || hasText(record.getValueString("content")))
-            {
-               notApplied.add(String.valueOf(record.getValueString("key")));
-            }
-         }
-         output.getRecords().addAll(input.getRecords());
-      }
-
-
-
-      /*******************************************************************************
-       ** Blank rows remove data-applied help and are not counted as failures.
-       *******************************************************************************/
-      private static boolean hasText(String text)
-      {
-         return (text != null && !text.isBlank());
-      }
-
-
-
-      /*******************************************************************************
-       ** Confirm this row, not merely another role or a code-declared entry.
-       *******************************************************************************/
-      private static boolean matches(QRecord record, QHelpContent help)
-      {
-         return (help.getFromData() && Objects.equals(record.getValueString("content"), help.getContent())
-            && Objects.equals(record.getValueString("summary"), help.getSummary())
-            && Objects.equals(record.getValueString("permissionName"), help.getPermissionName())
-            && Objects.equals(record.getValueString("clientChannel"), help.getClientChannel())
-            && Objects.equals(record.getValueString("format"), help.getFormat() == null ? null : help.getFormat().name())
-            && help.getRoles() != null && help.getRoles().stream().anyMatch(role -> role.toString().equals(record.getValueString("role"))));
-      }
-
-
-
-      /*******************************************************************************
-       ** Actual applied entries, with core's unresolved keys excluded.
-       *******************************************************************************/
-      @Override
-      public ArrayList<ProcessSummaryLineInterface> getProcessSummary(RunBackendStepOutput output, boolean result)
-      {
-         ArrayList<ProcessSummaryLineInterface> lines = new ArrayList<>();
-         lines.add(line(Status.OK, applied, "help entries applied"));
-         if(!notApplied.isEmpty())
-         {
-            lines.add(line(Status.ERROR, notApplied.size(), "help entries could not be confirmed as applied"));
-            notApplied.forEach(key -> lines.add(new ProcessSummaryLine(Status.ERROR, null, key)));
-         }
-         return (lines);
-      }
-   }
 }

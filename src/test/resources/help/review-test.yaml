@@ -1,0 +1,7 @@
+bundle: review-test
+version: "1"
+layer: HOST
+entries:
+  - key: table:person;field:name
+    summary: A person name.
+    content: Use the full name.
