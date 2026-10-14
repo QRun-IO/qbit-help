@@ -23,7 +23,6 @@
 
    <properties>
       <revision>0.1.0-SNAPSHOT</revision>
-      <!-- STAND-IN(core=QRun-IO/qqq#1198, removeBy=4.1.0-RC.8): pin to 4.1.0-RC.7 -->
       <qqq.version>4.1.0-RC.7</qqq.version>
       <maven.compiler.source>21</maven.compiler.source>
       <maven.compiler.target>21</maven.compiler.target>
