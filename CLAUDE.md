@@ -4,7 +4,7 @@ QQQ in-app help authoring only. Core owns storage, targeting, search, applicatio
 
 ## Build
 
-Java 21, `qbit-build-parent` 2.0.0, `qqq.version=4.1.0-RC.7`; verify bundle work with local `-Dqqq.version=4.1.0-help2-SNAPSHOT` (QRun-IO/qqq#1198), stand-in deadline RC.8. Use `./mvnw -o verify` (`mvnw.cmd` on Windows), then online if missing artifacts. Maven 3.10 cannot load the current parent's unflattened `${revision}`; wrapper is 3.9.11.
+Java 21, `qbit-build-parent` 2.0.0, `qqq.version=4.1.0-RC.11`; the published dependency includes the help-bundle APIs (QRun-IO/qqq#1198), so no local stand-in is required. Use `./mvnw -o verify` (`mvnw.cmd` on Windows), then online if missing artifacts. Maven 3.10 cannot load the current parent's unflattened `${revision}`; wrapper is 3.9.11.
 
 JUnit 5 + AssertJ, real QQQ memory backend and streamed process runner. Checkstyle is copied from qbit-webhooks. JaCoCo requires 70% instruction and 90% class coverage. Do not skip gates or exclude authoring classes.
 

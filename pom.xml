@@ -23,7 +23,7 @@
 
    <properties>
       <revision>0.1.0-SNAPSHOT</revision>
-      <qqq.version>4.1.0-RC.7</qqq.version>
+      <qqq.version>4.1.0-RC.11</qqq.version>
       <maven.compiler.source>21</maven.compiler.source>
       <maven.compiler.target>21</maven.compiler.target>
       <jacoco.version>0.8.15</jacoco.version>

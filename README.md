@@ -5,7 +5,7 @@ The authoring experience for QQQ in-app help: a **Help** app, coverage dashboard
 ## Requirements and installation
 
 - Java 21 and `qbit-build-parent` 2.0.0.
-- QQQ with help bundles (QRun-IO/qqq#1198). Verification uses the locally installed `4.1.0-help2-SNAPSHOT`; the checked-in pin is `4.1.0-RC.7`, with the stand-in removed by RC.8. This is not a claim that published RC.7 contains the bundle APIs.
+- QQQ `4.1.0-RC.11` with help bundles (QRun-IO/qqq#1198), available from the configured Maven repository. Full verification and coverage checks run against this published dependency; a local stand-in is no longer required.
 - A QQQ UI using `/qqq/v1`, including its widget and process endpoints. Next supplies the help renderer and in-context author mode.
 - A host backend supporting the standard core `helpContent` table. The host owns database schema creation/migration; the producer defines metadata, not database DDL.
 
